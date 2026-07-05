@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>無料セキュリティ診断</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: #f7f6f3;
+    color: #1a1a1a;
+    padding: 40px 20px;
+  }
+  .container { max-width: 560px; margin: 0 auto; }
+  .card {
+    background: #fff;
+    border: 1px solid #e5e3dc;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 8px; }
+  p.lead { font-size: 14px; color: #6b6a64; line-height: 1.7; margin-bottom: 20px; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  input[type=text] {
+    flex: 1; height: 44px; padding: 0 14px; font-size: 15px;
+    border: 1px solid #d3d1c7; border-radius: 8px; outline: none;
+  }
+  input[type=text]:focus { border-color: #1a1a1a; }
+  button {
+    height: 44px; padding: 0 20px; font-size: 14px; font-weight: 500;
+    background: #1a1a1a; color: #fff; border: none; border-radius: 8px;
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hint { font-size: 12px; color: #9a9890; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .loading { text-align: center; padding: 40px 0; }
+  .spinner {
+    width: 24px; height: 24px; border: 3px solid #e5e3dc; border-top-color: #1a1a1a;
+    border-radius: 50%; margin: 0 auto 16px; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .score-wrap { text-align: center; padding: 24px 0; }
+  .score-num { font-size: 48px; font-weight: 600; }
+  .score-label { font-size: 13px; color: #6b6a64; margin-top: 4px; }
+  .check-row {
+    display: flex; align-items: flex-start; gap: 10px; padding: 12px 0;
+    border-bottom: 1px solid #f0eee7;
+  }
+  .check-row:last-child { border-bottom: none; }
+  .badge {
+    min-width: 22px; height: 22px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;
+  }
+  .badge.pass { background: #e1f0e3; color: #2a7a3b; }
+  .badge.warn { background: #fbf0dd; color: #a26b0c; }
+  .badge.fail { background: #fce4e4; color: #b3302f; }
+  .badge.unknown { background: #ece9e3; color: #6b6a64; }
+  .locked-block { filter: blur(4px); opacity: 0.6; pointer-events: none; user-select: none; }
+  .unlock-card { background: #f7f6f3; border-radius: 8px; padding: 20px; text-align: center; }
+  .error-text { color: #b3302f; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="card">
+    <h1>無料セキュリティ診断</h1>
+    <p class="lead">会社のドメインを入力するだけで、外部から見える危険度を無料でチェックします。登録不要、インストール不要です。</p>
+
+    <div id="screen-input" class="screen active">
+      <div class="input-row">
+        <input type="text" id="domain-input" placeholder="example.co.jp" autocomplete="off">
+        <button id="scan-btn" onclick="runScan()">診断する</button>
+      </div>
+      <div id="error-box" class="error-text"></div>
+      <p class="hint">公開情報のみをチェックします。御社のシステムに接続・侵入することはありません。</p>
+    </div>
+
+    <div id="screen-loading" class="screen">
+      <div class="loading">
+        <div class="spinner"></div>
+        <div id="loading-text" style="font-size:14px;color:#6b6a64;">診断を実行しています...</div>
+      </div>
+    </div>
+
+    <div id="screen-result" class="screen">
+      <div class="score-wrap">
+        <div class="score-num" id="score-num">--</div>
+        <div class="score-label">危険度スコア（100点満点・低いほど危険）</div>
+      </div>
+
+      <div id="result-list"></div>
+
+      <div class="unlock-card" style="margin-top:16px;">
+        <p style="font-size:14px;margin-bottom:12px;line-height:1.7;">残りの項目の詳細と、専門用語なしの対処方法をまとめたレポートをメールでお届けします</p>
+        <div class="input-row" style="max-width:380px;margin:0 auto;">
+          <input type="text" id="email-input" placeholder="your@email.com">
+          <button onclick="unlockReport()">受け取る</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// 本番デプロイ時はバックエンドのURLに置き換える
+const API_BASE = "http://localhost:8000";
+
+const loadingMessages = [
+  "SSL証明書を確認中...",
+  "DNS設定を確認中...",
+  "セキュリティヘッダーを確認中...",
+  "漏洩データベースを確認中..."
+];
+
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+function cleanDomainInput(raw) {
+  return raw.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+}
+
+async function runScan() {
+  const raw = document.getElementById("domain-input").value;
+  const domain = cleanDomainInput(raw);
+  const errorBox = document.getElementById("error-box");
+  errorBox.textContent = "";
+
+  if (!domain || !domain.includes(".")) {
+    errorBox.textContent = "正しいドメイン形式で入力してください（例: example.co.jp）";
+    return;
+  }
+
+  show("screen-loading");
+  let i = 0;
+  const interval = setInterval(() => {
+    document.getElementById("loading-text").textContent = loadingMessages[i % loadingMessages.length];
+    i++;
+  }, 1200);
+
+  try {
+    const resp = await fetch(`${API_BASE}/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || "診断に失敗しました");
+    }
+    const data = await resp.json();
+    clearInterval(interval);
+    renderResult(data);
+  } catch (e) {
+    clearInterval(interval);
+    show("screen-input");
+    errorBox.textContent = "診断中にエラーが発生しました。時間をおいて再度お試しください。";
+    console.error(e);
+  }
+}
+
+const CHECK_LABELS = {
+  ssl_certificate: "SSL証明書",
+  spf_dmarc: "なりすましメール対策（SPF/DMARC）",
+  security_headers: "セキュリティヘッダー",
+  breach_exposure: "情報漏洩チェック"
+};
+
+function renderResult(data) {
+  document.getElementById("score-num").textContent = data.score;
+  const scoreEl = document.getElementById("score-num");
+  if (data.score >= 70) scoreEl.style.color = "#2a7a3b";
+  else if (data.score >= 40) scoreEl.style.color = "#a26b0c";
+  else scoreEl.style.color = "#b3302f";
+
+  const list = document.getElementById("result-list");
+  list.innerHTML = data.results.map(r => {
+    const label = CHECK_LABELS[r.check] || r.check;
+    const isLocked = r.locked === true;
+    const rowClass = isLocked ? "check-row locked-block" : "check-row";
+    const iconMap = { pass: "✓", warn: "!", fail: "✕", unknown: "?" };
+    return `
+      <div class="${rowClass}">
+        <div class="badge ${r.status}">${iconMap[r.status] || "?"}</div>
+        <div>
+          <div style="font-size:14px;font-weight:500;">${label}</div>
+          <div style="font-size:13px;color:#6b6a64;margin-top:2px;">${r.message}</div>
+        </div>
+      </div>`;
+  }).join("");
+
+  show("screen-result");
+}
+
+function unlockReport() {
+  const email = document.getElementById("email-input").value.trim();
+  if (!email || !email.includes("@")) {
+    alert("正しいメールアドレスを入力してください");
+    return;
+  }
+  // 本番ではここでバックエンドにメールを送信し、リード情報を保存する
+  // 例: fetch(`${API_BASE}/lead`, { method: "POST", body: JSON.stringify({ email, domain }) })
+  alert("詳細レポートをメールでお送りします（実装例）");
+}
+</script>
+</body>
+</html>
