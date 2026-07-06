@@ -100,7 +100,7 @@
         <p style="font-size:14px;margin-bottom:12px;line-height:1.7;">残りの項目の詳細と、専門用語なしの対処方法をまとめたレポートをメールでお届けします</p>
         <div class="input-row" style="max-width:380px;margin:0 auto;">
           <input type="text" id="email-input" placeholder="your@email.com">
-          <button onclick="unlockReport()">受け取る</button>
+          <button id="email-btn" onclick="unlockReport()">受け取る</button>
         </div>
       </div>
     </div>
@@ -109,7 +109,6 @@
 </div>
 
 <script>
-// 本番デプロイ時はバックエンドのURLに置き換える
 const API_BASE = "https://security-checker-bcfg.onrender.com";
 
 const loadingMessages = [
@@ -118,6 +117,11 @@ const loadingMessages = [
   "セキュリティヘッダーを確認中...",
   "漏洩データベースを確認中..."
 ];
+
+// 診断結果を保持する変数
+let currentDomain = "";
+let currentScore = 0;
+let currentResults = [];
 
 function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -175,6 +179,11 @@ const CHECK_LABELS = {
 };
 
 function renderResult(data) {
+  // 診断結果を変数に保存
+  currentDomain = data.domain;
+  currentScore = data.score;
+  currentResults = data.results;
+
   document.getElementById("score-num").textContent = data.score;
   const scoreEl = document.getElementById("score-num");
   if (data.score >= 70) scoreEl.style.color = "#2a7a3b";
@@ -200,15 +209,35 @@ function renderResult(data) {
   show("screen-result");
 }
 
-function unlockReport() {
+async function unlockReport() {
   const email = document.getElementById("email-input").value.trim();
   if (!email || !email.includes("@")) {
     alert("正しいメールアドレスを入力してください");
     return;
   }
-  // 本番ではここでバックエンドにメールを送信し、リード情報を保存する
-  // 例: fetch(`${API_BASE}/lead`, { method: "POST", body: JSON.stringify({ email, domain }) })
-  alert("詳細レポートをメールでお送りします（実装例）");
+  const btn = document.getElementById("email-btn");
+  btn.disabled = true;
+  btn.textContent = "送信中...";
+  try {
+    const resp = await fetch(`${API_BASE}/lead`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email,
+        domain: currentDomain,
+        score: currentScore,
+        results: currentResults
+      })
+    });
+    if (!resp.ok) throw new Error("送信失敗");
+    btn.textContent = "✓ 送信しました";
+    document.getElementById("email-input").disabled = true;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "受け取る";
+    alert("送信に失敗しました。時間をおいて再度お試しください。");
+    console.error(e);
+  }
 }
 </script>
 </body>
