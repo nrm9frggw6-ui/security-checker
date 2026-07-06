@@ -3,3 +3,4 @@ uvicorn
 dnspython
 requests
 pydantic
+resend
